@@ -324,8 +324,9 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
 
   std::vector<const char *> command_line_args_c;
 
-  for (const auto &arg : command_line_args) {
-    command_line_args_c.push_back(arg.c_str());
+  // we should skip 'assets dir' param, otherwise flutter will refuse to parse the command line args
+  for (size_t argidx = 1; argidx < command_line_args.size(); ++argidx) {
+    command_line_args_c.push_back(command_line_args[argidx].c_str());
   }
 
   FlutterProjectArgs args = {
