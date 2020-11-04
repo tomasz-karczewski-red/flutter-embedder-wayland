@@ -5,6 +5,16 @@ A Flutter Embedder that talks to Wayland.
 
 ![Running in Weston](assets/image.png)
 
+Zodiac Instructions
+-------------------
+
+* Make sure `libglfw3-dev` (Ubuntu) or `glfw-wayland` (Arch) package is installed.
+* To build with `xdg-shell` protocol extension support (e.g. to support compositors withput `wl_shell` protocol support like KWin):
+  * Make sure `wayland-protocols` package is installed (minimum 1.12 version is required).
+  * Make sure `extra-cmake-modules` package is installed.
+  * Use general `cmake ../ -G Ninja` to build without `xdg-shell` support
+  * If you need `xdg-shell` support use `cmake ../ -G Ninja -DWITH_XDG_SHELL=ON` to build with `xdg-shell`
+
 Build Setup Instructions
 ------------------------
 

@@ -8,8 +8,14 @@
 #include <vector>
 
 #include "flutter_application.h"
+#include "logger.h"
 #include "utils.h"
 #include "wayland_display.h"
+#include "global_helpers.h"
+
+#ifdef RDK
+#include <weston/config-parser.h>
+#endif
 
 namespace flutter {
 
@@ -40,7 +46,44 @@ asset_bundle_path: The Flutter application code needs to be snapshotted using
 )~" << std::endl;
 }
 
+#ifdef RDK
+
+static std::pair<unsigned int, unsigned int> getDisplaySize() {
+  unsigned int width = 0;
+  unsigned int height = 0;
+
+  weston_config* pConfig = weston_config_parse("/usr/bin/weston.ini");
+  if (pConfig != NULL) {
+    weston_config_section* pSection = weston_config_get_section(pConfig, "output", NULL, NULL);
+    if (pSection != NULL) {
+      char* displayModeStr = NULL;
+      weston_config_section_get_string(pSection, "mode", &displayModeStr, "1280x720");
+
+      if (displayModeStr != NULL) {
+        std::string screenGeometry(displayModeStr);
+        auto screenGeometryPair = splitStr(screenGeometry, "x");
+        width = std::stoi(screenGeometryPair[0]);
+        height = std::stoi(screenGeometryPair[1]);
+        free(displayModeStr);
+      } else {
+        SPDLOG_ERROR("cannot get 'mode' from 'output' section from weston.ini");
+      }
+    } else {
+      SPDLOG_ERROR("cannot get 'output' section from weston.ini");
+    }
+
+    weston_config_destroy(pConfig);
+  } else {
+    SPDLOG_ERROR("cannot read/parse weston.ini");
+  }
+
+  return std::make_pair(width, height);
+}
+
+#endif
+
 static bool Main(std::vector<std::string> args) {
+#ifndef RDK_EMBEDDED
   if (args.size() == 0) {
     std::cerr << "   <Invalid Arguments>   " << std::endl;
     PrintUsage();
@@ -48,6 +91,9 @@ static bool Main(std::vector<std::string> args) {
   }
 
   const auto asset_bundle_path = args[0];
+#else
+  const auto asset_bundle_path = (args.size() > 0 && args[0].size() > 0) ? args[0] : "/usr/share/flutter/main/data/flutter_assets";
+#endif
 
   if (!FlutterAssetBundleIsValid(asset_bundle_path)) {
     std::cerr << "   <Invalid Flutter Asset Bundle>   " << std::endl;
@@ -55,28 +101,44 @@ static bool Main(std::vector<std::string> args) {
     return false;
   }
 
-  const size_t kWidth = 800;
-  const size_t kHeight = 600;
+  size_t kWidth = 800;
+  size_t kHeight = 600;
+  size_t kWidthAlign = 0;
+  size_t kHeightAlign = 0;
+
+#ifdef RDK
+  auto screenGeometry = getDisplaySize();
+  kWidth = screenGeometry.first;
+  kHeight = screenGeometry.second;
+
+#ifdef RDK_WINDOW_ALIGN
+  kWidthAlign = 35;
+  kHeightAlign = 23;
+#endif
+
+  SPDLOG_DEBUG("weston display size = {}x{}",
+               kWidth, kHeight);
+#endif
 
   for (const auto& arg : args) {
-    FLWAY_ERROR << "Arg: " << arg << std::endl;
+    SPDLOG_DEBUG("Arg: {}", arg);
   }
 
-  WaylandDisplay display(kWidth, kHeight);
+  WaylandDisplay display(kWidth, kHeight, kWidthAlign, kHeightAlign);
 
   if (!display.IsValid()) {
-    FLWAY_ERROR << "Wayland display was not valid." << std::endl;
+    SPDLOG_ERROR("Wayland display was not valid.");
     return false;
   }
 
-  FlutterApplication application(asset_bundle_path, args, display);
+  FlutterApplication application(asset_bundle_path, args, display, display);
   if (!application.IsValid()) {
-    FLWAY_ERROR << "Flutter application was not valid." << std::endl;
+    SPDLOG_ERROR("Flutter application was not valid.");
     return false;
   }
 
-  if (!application.SetWindowSize(kWidth, kHeight)) {
-    FLWAY_ERROR << "Could not update Flutter application size." << std::endl;
+  if (!application.SetWindowSize(kWidth - (kWidthAlign * 2), kHeight - (kHeightAlign * 2))) {
+    SPDLOG_ERROR("Could not update Flutter application size.");
     return false;
   }
 
@@ -88,9 +150,19 @@ static bool Main(std::vector<std::string> args) {
 }  // namespace flutter
 
 int main(int argc, char* argv[]) {
+  auto console = spdlog::stdout_color_mt("console");
+  spdlog::set_level(spdlog::level::debug);
+  spdlog::set_default_logger(console);
+  spdlog::set_pattern("[%H:%M:%S.%e][%^%L%$] %s:%#: %!: %v");
+
   std::vector<std::string> args;
   for (int i = 1; i < argc; ++i) {
     args.push_back(argv[i]);
   }
-  return flutter::Main(std::move(args)) ? EXIT_SUCCESS : EXIT_FAILURE;
+
+  int res = flutter::Main(std::move(args)) ? EXIT_SUCCESS : EXIT_FAILURE;
+
+  SPDLOG_INFO("Application exited normally with: {}", res);
+
+  return res;
 }

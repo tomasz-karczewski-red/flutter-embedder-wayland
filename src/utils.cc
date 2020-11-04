@@ -8,6 +8,8 @@
 
 #include <sstream>
 
+#include "logger.h"
+
 namespace flutter {
 
 static std::string GetExecutablePath() {
@@ -48,16 +50,25 @@ bool FileExistsAtPath(const std::string& path) {
 
 bool FlutterAssetBundleIsValid(const std::string& bundle_path) {
   if (!FileExistsAtPath(bundle_path)) {
-    FLWAY_ERROR << "Bundle directory does not exist." << std::endl;
+    SPDLOG_ERROR("Bundle directory does not exist.");
     return false;
   }
 
-  if (!FileExistsAtPath(bundle_path + std::string{"/kernel_blob.bin"})) {
-    FLWAY_ERROR << "Kernel blob does not exist." << std::endl;
+  auto kernel_path = bundle_path + std::string{"/kernel_blob.bin"};
+  auto aotelf_path = bundle_path + std::string{"/"} + FlutterGetAppAotElfName();
+  auto kernel      = FileExistsAtPath(kernel_path);
+  auto aotelf      = FileExistsAtPath(aotelf_path);
+
+  if (!(kernel || aotelf)) {
+    SPDLOG_ERROR("Kernel blob does not exist. kernel = {} aotelf = {}", kernel, aotelf);
     return false;
   }
 
   return true;
+}
+
+std::string FlutterGetAppAotElfName() {
+  return std::string("../../lib/libapp.so"); // assumes 'flutter build' directory layout
 }
 
 }  // namespace flutter
