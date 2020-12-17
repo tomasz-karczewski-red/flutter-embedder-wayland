@@ -35,6 +35,8 @@
 
 namespace flutter {
 
+static auto t00 = FlutterEngineGetCurrentTime();
+
 static double get_pixel_ratio(int32_t physical_width, int32_t physical_height, int32_t pixels_width, int32_t pixels_height) {
 
   if (pixels_width == 0 || physical_height == 0 || pixels_width == 0 || pixels_height == 0) {
@@ -448,6 +450,8 @@ WaylandDisplay::WaylandDisplay(size_t width, size_t height, const std::string &b
     return;
   }
 
+  gpu_stats_.Init();
+
   if (!SetupEngine(bundle_path, command_line_args)) {
     FLWAY_ERROR << "Could not setup Flutter Engine." << std::endl;
     return;
@@ -485,11 +489,40 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
   config.open_gl.present = [](void *data) -> bool {
     WaylandDisplay *const wd = get_wayland_display(data);
 
+    static int frame_counter = 0;
+    static auto t0           = FlutterEngineGetCurrentTime();
+    const auto t1            = FlutterEngineGetCurrentTime();
+
+    // eglSwapInterval(wd->egl_display_,0);
     if (eglSwapBuffers(wd->egl_display_, wd->egl_surface_) != EGL_TRUE) {
       LogLastEGLError();
       FLWAY_ERROR << "Could not swap the EGL buffer." << std::endl;
       return false;
     }
+    const auto t2            = FlutterEngineGetCurrentTime();
+    auto presentation_diff     = (t1 - t0) / 1e9;
+    auto swap_buffer_duration = (t2 - t1) / 1e9;
+    fprintf(wd->gpu_stats_.StatsFile(), "[%07.3f]: xxx: %.5f  eeglSwapBuffers: %.5f pid:%ld\n", (t0 - t00)/1e9, presentation_diff, swap_buffer_duration, syscall(__NR_gettid));
+
+    static bool configure = true;
+    if (configure) {
+      configure = false;
+      wd->gpu_stats_.Acquire();
+      // wd->gpu_stats_.Enable(0,{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15});
+      // wd->gpu_stats_.Enable(0,{16,17,18,19,20,21,22,23,24,25,26,27,28,29});
+
+      //nice set:
+      wd->gpu_stats_.Enable(0,{0,1,3,9,13,14,15,16,17,18,19,24,25,26,27});
+      wd->gpu_stats_.Enable(1,{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18});
+      wd->gpu_stats_.Enable(2,{0,1,2,3,4,5,6,7,16,17,18});
+      wd->gpu_stats_.Start();
+    }
+
+    if (frame_counter % 1 == 0) {
+      wd->gpu_stats_.Print((t0 - t00)/1e9);
+    }
+    t0 = t1;
+    frame_counter++;
 
     return true;
   };

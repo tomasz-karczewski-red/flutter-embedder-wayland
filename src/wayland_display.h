@@ -23,6 +23,8 @@
 
 #include "macros.h"
 
+#include "gpu_stats.h"
+
 namespace flutter {
 
 class WaylandDisplay {
@@ -97,6 +99,8 @@ private:
   ssize_t sendNotifyData();
   ssize_t readNotifyData();
   // }
+
+  GPUStats gpu_stats_;
 
   FLWAY_DISALLOW_COPY_AND_ASSIGN(WaylandDisplay)
 };

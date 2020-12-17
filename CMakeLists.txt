@@ -42,6 +42,7 @@ set(SOURCES
     src/utils.h
     src/egl_utils.h
     src/wayland_display.h
+    src/gpu_stats.cc
 )
 
 ecm_add_wayland_client_protocol(
