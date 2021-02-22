@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 
-cmake_minimum_required(VERSION 3.3)
+cmake_minimum_required(VERSION 3.9)
 
 project(flutter-launcher-wayland)
 
@@ -21,15 +21,11 @@ pkg_search_module(GDK gdk-3.0 REQUIRED) # dw: Not used for linking, we just need
 # just provide all FLUTTER_ENGINE* variables using -D
 pkg_search_module(FLUTTER_ENGINE flutter-engine)
 
-if (CMAKE_VERSION VERSION_LESS "3.8.2")
-  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
-else()
-  set(CMAKE_CXX_STANDARD 17)
-  set(CMAKE_CXX_STANDARD_REQUIRED ON)
-  set(CMAKE_CXX_EXTENSIONS OFF)
-endif()
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-set (CMAKE_CXX_FLAGS "-Wpedantic -Wall -Wextra -Woverloaded-virtual -Wno-unused-parameter -Wno-c++20-designator ${CMAKE_CXX_FLAGS}")
+set (CMAKE_CXX_FLAGS "-Wall -Wextra -Woverloaded-virtual -Wno-unused-parameter ${CMAKE_CXX_FLAGS}")
 
 set(SOURCES
     src/main.cc
@@ -67,8 +63,6 @@ link_directories(
 )
 
 add_executable(flutter-launcher-wayland ${SOURCES})
-
-target_compile_definitions(flutter-launcher-wayland PRIVATE "-DGLFW_INCLUDE_ES2")
 
 target_include_directories(flutter-launcher-wayland
   PRIVATE

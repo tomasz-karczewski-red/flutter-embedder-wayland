@@ -198,7 +198,7 @@ const wl_keyboard_listener WaylandDisplay::kKeyboardListener = {
           WaylandDisplay *const wd = get_wayland_display(data);
 
           wd->keymap_format         = static_cast<wl_keyboard_keymap_format>(format);
-          char *const keymap_string = reinterpret_cast<char *const>(mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0));
+          char *const keymap_string = reinterpret_cast<char *>(mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0));
           xkb_keymap_unref(wd->keymap);
           wd->keymap = xkb_keymap_new_from_string(wd->xkb_context, keymap_string, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
           munmap(keymap_string, size);
@@ -215,16 +215,16 @@ const wl_keyboard_listener WaylandDisplay::kKeyboardListener = {
         [](void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, uint32_t time, uint32_t key, uint32_t state_w) {
           WaylandDisplay *const wd = get_wayland_display(data);
 
-          uint32_t repeat_rate_ms     = 0;
+          uint32_t repeat_delay_ms_   = 0;
           uint32_t repeat_interval_ms = 0;
 
           if (wd->key_handler(wd->key.last_ = key, wd->key.state_ = state_w)) {
-            repeat_rate_ms     = wd->key.repeat_delay_ms_;
+            repeat_delay_ms_   = wd->key.repeat_delay_ms_;
             repeat_interval_ms = wd->key.repeat_interval_ms_;
           }
 
           struct itimerspec ts;
-          timespec_from_msec(&ts.it_value, repeat_rate_ms);
+          timespec_from_msec(&ts.it_value, repeat_delay_ms_);
           timespec_from_msec(&ts.it_interval, repeat_interval_ms);
           const int rv = timerfd_settime(wd->key.timer_fd_, 0, &ts, nullptr);
 
@@ -688,6 +688,12 @@ WaylandDisplay::~WaylandDisplay() {
     seat_ = nullptr;
   }
 
+  xkb_keymap_unref(keymap);
+  keymap = nullptr;
+
+  xkb_context_unref(xkb_context);
+  xkb_context = nullptr;
+
   if (egl_surface_) {
     eglDestroySurface(egl_display_, egl_surface_);
     egl_surface_ = nullptr;
@@ -751,18 +757,23 @@ ssize_t WaylandDisplay::vSyncHandler() {
   return 1;
 }
 
-const struct wl_callback_listener WaylandDisplay::kFrameListener = {.done = [](void *data, struct wl_callback *cb, uint32_t callback_data) {
-  WaylandDisplay *const wd = get_wayland_display(data);
+const struct wl_callback_listener WaylandDisplay::kFrameListener = {
 
-  /* check if we presentation time extension interface working */
-  if (wd->vsync.presentation_clk_id_ != UINT32_MAX) {
-    return;
-  }
+    .done =
+        [](void *data, struct wl_callback *cb, uint32_t callback_data) {
+          WaylandDisplay *const wd = get_wayland_display(data);
 
-  wd->vsync.last_frame_ = FlutterEngineGetCurrentTime();
-  wl_callback_destroy(cb);
-  wl_callback_add_listener(wl_surface_frame(wd->surface_), &kFrameListener, data);
-}};
+          /* check if we have presentation time extension interface working */
+          if (wd->vsync.presentation_clk_id_ != UINT32_MAX) {
+            return;
+          }
+
+          wd->vsync.last_frame_ = FlutterEngineGetCurrentTime();
+          wl_callback_destroy(cb);
+          wl_callback_add_listener(wl_surface_frame(wd->surface_), &kFrameListener, data);
+        }
+
+};
 
 ssize_t WaylandDisplay::vSyncReadNotifyData() {
   ssize_t rv;
@@ -823,9 +834,9 @@ bool WaylandDisplay::Run() {
       int rv;
 
       struct pollfd fds[3] = {
-          {.fd = vsync.sv_[vsync.SOCKET_READER], .events = POLLIN},
-          {.fd = fd, .events = POLLIN | POLLERR},
-          {.fd = key.timer_fd_, .events = POLLIN | POLLERR},
+          {.fd = vsync.sv_[vsync.SOCKET_READER], .events = POLLIN, .revents = 0},
+          {.fd = fd, .events = POLLIN | POLLERR, .revents = 0},
+          {.fd = key.timer_fd_, .events = POLLIN | POLLERR, .revents = 0},
       };
 
       do {
