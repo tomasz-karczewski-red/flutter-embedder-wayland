@@ -42,8 +42,7 @@ static double get_pixel_ratio(int32_t physical_width, int32_t physical_height, i
     return 1.0;
   }
 
-  // TODO
-  return 1.0;
+  return getEnv("FLUTTER_WAYLAND_PIXEL_RATIO", 1.0);
 }
 
 static inline WaylandDisplay *get_wayland_display(void *data, const bool check_non_null = true) {
