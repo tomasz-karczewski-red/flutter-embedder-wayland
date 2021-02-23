@@ -632,7 +632,14 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
     }
   }
 
-  auto result = FlutterEngineRun(FLUTTER_ENGINE_VERSION, &config, &args, this /* userdata */, &engine_);
+  auto result = FlutterEngineInitialize(FLUTTER_ENGINE_VERSION, &config, &args, this /* userdata */, &engine_);
+
+  if (result != kSuccess) {
+    FLWAY_ERROR << "Could not initialize the Flutter engine" << std::endl;
+    return false;
+  }
+
+  result = FlutterEngineRunInitialized(engine_);
 
   if (result != kSuccess) {
     FLWAY_ERROR << "Could not run the Flutter engine" << std::endl;
