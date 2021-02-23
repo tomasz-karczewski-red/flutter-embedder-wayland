@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <sstream>
 #include <unistd.h>
 #include <string.h>
@@ -139,6 +140,34 @@ bool FlutterSendMessage(FlutterEngine engine, const char *channel, const uint8_t
   }
 
   return message_result == kSuccess;
+}
+
+void FlutterParseLocale(const std::string &locale, MyFlutterLocale *fl) {
+  if (locale.empty() || fl == nullptr) {
+    return;
+  }
+
+  char *l = strdup(locale.c_str());
+
+  char *match = strrchr(l, '@');
+  if (match != nullptr) {
+    fl->variant_code = strdup(match + 1);
+    *match           = '\0';
+  }
+
+  match = strrchr(l, '.');
+  if (match != nullptr) {
+    fl->script_code = strdup(match + 1);
+    *match          = '\0';
+  }
+
+  match = strrchr(l, '_');
+  if (match != nullptr) {
+    fl->country_code = strdup(match + 1);
+    *match           = '\0';
+  }
+
+  fl->language_code = l;
 }
 
 } // namespace flutter

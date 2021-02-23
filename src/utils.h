@@ -27,6 +27,23 @@ std::string FlutterGetAppAotElfName();
 
 bool FlutterSendMessage(FlutterEngine engine, const char *channel, const uint8_t *message, const size_t message_size);
 
+struct MyFlutterLocale : public FlutterLocale {
+  MyFlutterLocale() {
+    struct_size   = sizeof(FlutterLocale);
+    language_code = script_code = country_code = variant_code = nullptr;
+  }
+
+  ~MyFlutterLocale() {
+    free((void *)language_code), language_code = nullptr;
+    free((void *)country_code), country_code   = nullptr;
+    free((void *)script_code), script_code     = nullptr;
+    free((void *)variant_code), variant_code   = nullptr;
+  }
+  FLWAY_DISALLOW_COPY_AND_ASSIGN(MyFlutterLocale)
+};
+
+void FlutterParseLocale(const std::string &locale, MyFlutterLocale *fl);
+
 template <typename T> T getEnv(const char *variable, T default_value);
 
 static inline void timespec_from_nsec(struct timespec *a, int64_t b) {

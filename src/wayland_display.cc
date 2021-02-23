@@ -604,10 +604,12 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
         }
       },
       .compute_platform_resolved_locale_callback = [](const FlutterLocale **supported_locales, size_t number_of_locales) -> const FlutterLocale * {
-        printf("compute_platform_resolved_locale_callback: number_of_locales: %zu\n", number_of_locales);
+        printf("locale.resolved.callback: number_of_locales: %zu\n", number_of_locales);
 
         if (number_of_locales > 0) {
-          return supported_locales[0];
+          const FlutterLocale *fl = supported_locales[0];
+          printf("locale.resolved: %s_%s.%s@%s\n", fl->language_code ? fl->language_code : "", fl->country_code ? fl->country_code : "", fl->script_code ? fl->script_code : "", fl->variant_code ? fl->variant_code : "");
+          return fl;
         }
 
         return nullptr;
@@ -644,6 +646,24 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
   if (result != kSuccess) {
     FLWAY_ERROR << "Could not run the Flutter engine" << std::endl;
     return false;
+  }
+
+  {
+    MyFlutterLocale fl;
+    std::string lang = getEnv("LANG", std::string(""));
+    FlutterParseLocale(lang, &fl);
+
+    if (fl.language_code != nullptr) {
+      printf("locale.parsed: %s_%s.%s@%s\n", fl.language_code ? fl.language_code : "", fl.country_code ? fl.country_code : "", fl.script_code ? fl.script_code : "", fl.variant_code ? fl.variant_code : "");
+      const FlutterLocale *flutter_locales[] = {&fl};
+
+      const auto rv = FlutterEngineUpdateLocales(engine_, flutter_locales, std::size(flutter_locales));
+
+      if (rv != kSuccess) {
+        FLWAY_ERROR << "Could not update locales for the Flutter engine" << std::endl;
+        return false;
+      }
+    }
   }
 
   if (window_metrix_skipped_) {
