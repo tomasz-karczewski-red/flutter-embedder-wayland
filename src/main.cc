@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "utils.h"
+#include "debug.h"
 #include "wayland_display.h"
 
 static_assert(FLUTTER_ENGINE_VERSION == 1, "");
@@ -36,12 +37,38 @@ asset_bundle_path: The Flutter application code needs to be snapshotted using
                    Flutter engine. To see all supported flags, run
                    `flutter_tester --help` using the test binary included in the
                    Flutter tools.
+
+Supported environment variables:
+     LANG=<string>
+                   Value encoded as per setlocale(3) (e.g. "szl_PL.utf8") is
+                   passed to the engine via UpdateLocales().
+
+                   See also: https://man7.org/linux/man-pages/man3/setlocale.3.html
+ 
+     FLUTTER_WAYLAND_PIXEL_RATIO=<double>
+                   Overwrites the pixel aspect ratio reported
+                   to the engine by FlutterEngineSendWindowMetricsEvent().
+
+                   See also: https://api.flutter.dev/flutter/dart-ui/Window/devicePixelRatio.html
+
+     FLUTTER_WAYLAND_MAIN_UI=<int>
+                   Non-zero value enables grabbing all keys (even without having
+                   a focus) using Xwayland keyboard grabbing protocol (assuming 
+                   server implement this extension).
+
+                   See also: https://github.com/wayland-project/wayland-protocols/tree/0a61d3516b10da4e65607a6dd97937ebedf6bcfa/unstable/xwayland-keyboard-grab
+
+     FLUTTER_LAUNCHER_WAYLAND_DEBUG=<string>
+                   where <string> can be any of syslog(3) prioritynames or its
+                   unique abbreviation e.g. "err", "warning", "info" or "debug".
 )~" << std::endl;
 }
 
 static bool Main(std::vector<std::string> args) {
+  dbg_init();
+
   if (args.size() == 1) {
-    std::cerr << "   <Invalid Arguments>   " << std::endl;
+    dbgE("Invalid list of arguments\n");
     PrintUsage();
     return false;
   }
@@ -49,7 +76,7 @@ static bool Main(std::vector<std::string> args) {
   const auto asset_bundle_path = args[1];
 
   if (!FlutterAssetBundleIsValid(asset_bundle_path)) {
-    std::cerr << "   <Invalid Flutter Asset Bundle>   " << std::endl;
+    dbgE("Invalid Flutter Asset Bundle\n");
     PrintUsage();
     return false;
   }
@@ -60,20 +87,15 @@ static bool Main(std::vector<std::string> args) {
   const std::vector<std::string> flutter_args(args.begin() + 1, args.end());
 
   for (const auto &arg : flutter_args) {
-    FLWAY_LOG << "Flutter arg: " << arg << std::endl;
+    dbgI("Flutter arg: %s\n", arg.c_str());
   }
 
   WaylandDisplay display(kWidth, kHeight, asset_bundle_path, flutter_args);
 
   if (!display.IsValid()) {
-    FLWAY_ERROR << "Wayland display was not valid." << std::endl;
+    dbgI("Wayland display was not valid\n");
     return false;
   }
-
-  // if (!application.SetWindowSize(kWidth, kHeight)) {
-  //   FLWAY_ERROR << "Could not update Flutter application size." << std::endl;
-  //   return false;
-  // }
 
   return display.Run();
 }

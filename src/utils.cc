@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "debug.h"
 #include "utils.h"
 
 namespace flutter {
@@ -47,18 +48,18 @@ std::string GetICUDataPath() {
 
   do {
     if (std::ifstream(icu_data_path)) {
-      std::cout << "Using: " << icu_data_path << std::endl;
+      dbgI("Using %s\n", icu_data_path.c_str());
       break;
     }
 
     icu_data_path = "/usr/share/flutter/icudtl.dat";
 
     if (std::ifstream(icu_data_path)) {
-      std::cout << "Using: " << icu_data_path << std::endl;
+      dbgI("Using: %s\n", icu_data_path.c_str());
       break;
     }
 
-    FLWAY_ERROR << "Unnable to locate icudtl.dat file" << std::endl;
+    dbgE("Unnable to locate icudtl.dat file\n");
     icu_data_path = "";
   } while (0);
 
@@ -101,7 +102,7 @@ bool FileExistsAtPath(const std::string &path) {
 
 bool FlutterAssetBundleIsValid(const std::string &bundle_path) {
   if (!FileExistsAtPath(bundle_path)) {
-    FLWAY_ERROR << "Bundle directory: '" << bundle_path << "' does not exist." << std::endl;
+    dbgE("Bundle directory: %s does not exist\n", bundle_path.c_str());
     return false;
   }
 
@@ -111,7 +112,7 @@ bool FlutterAssetBundleIsValid(const std::string &bundle_path) {
   auto aotelf      = FileExistsAtPath(aotelf_path);
 
   if (!(kernel || aotelf)) {
-    FLWAY_ERROR << "Could not found neither " << kernel_path << " nor " << aotelf_path << std::endl;
+    dbgE("Could not found neither %s nor %s\n", kernel_path.c_str(), aotelf_path.c_str());
     return false;
   }
 

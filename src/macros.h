@@ -13,10 +13,3 @@
 #define FLWAY_DISALLOW_COPY_AND_ASSIGN(TypeName)                                                                                                                                                                                               \
   FLWAY_DISALLOW_COPY(TypeName)                                                                                                                                                                                                                \
   FLWAY_DISALLOW_ASSIGN(TypeName)
-
-#define __FLWAY_LINE_PREFIX << __FILE__ << ":" << std::to_string(__LINE__) << ": "
-#define FLWAY_LOG std::cout << "LOG: " __FLWAY_LINE_PREFIX
-#define FLWAY_ERROR std::cerr << "ERROR: " __FLWAY_LINE_PREFIX
-#define FLWAY_WIP                                                                                                                                                                                                                              \
-  std::cerr << "Work In Progress. Aborting." << std::endl;                                                                                                                                                                                     \
-  abort();

@@ -7,6 +7,7 @@
 #include <EGL/egl.h>
 #include "egl_utils.h"
 #include "utils.h"
+#include "debug.h"
 
 namespace flutter {
 
@@ -33,12 +34,12 @@ void LogLastEGLError() {
 
   for (size_t i = 0; i < count; i++) {
     if (last_error == pairs[i].code) {
-      FLWAY_ERROR << "EGL Error: " << pairs[i].name << " (" << pairs[i].code << ")" << std::endl;
+      dbgE("EGL Error: %s (code: %d)\n", pairs[i].name, pairs[i].code);
       return;
     }
   }
 
-  FLWAY_ERROR << "Unknown EGL Error" << std::endl;
+  dbgE("Unknown EGL Error (%d)\n", last_error);
 }
 
 } // namespace flutter

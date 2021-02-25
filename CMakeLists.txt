@@ -33,12 +33,14 @@ set(SOURCES
     src/keys.cc
     src/egl_utils.cc
     src/utils.cc
+    src/debug.cc
     src/wayland_display.cc
     src/elf.h
     src/macros.h
     src/keys.h
     src/utils.h
     src/egl_utils.h
+    src/debug.h
     src/wayland_display.h
 )
 

@@ -28,6 +28,7 @@
 #include <sys/mman.h>
 #include <linux/input-event-codes.h>
 
+#include "debug.h"
 #include "elf.h"
 #include "keys.h"
 #include "utils.h"
@@ -61,7 +62,7 @@ const wl_registry_listener WaylandDisplay::kRegistryListener = {
     .global = [](void *data, struct wl_registry *wl_registry, uint32_t name, const char *interface, uint32_t version) -> void {
       WaylandDisplay *const wd = get_wayland_display(data);
 
-      printf("AnnounceRegistryInterface(registry:%p, name:%2u, interface:%s, version:%u)\n", static_cast<void *>(wl_registry), name, interface, version);
+      dbgI("registry: name:%2u, interface:%s, version:%u\n", name, interface, version);
 
       if (strcmp(interface, "wl_compositor") == 0) {
         wd->compositor_ = static_cast<decltype(compositor_)>(wl_registry_bind(wl_registry, name, &wl_compositor_interface, 1));
@@ -128,7 +129,7 @@ const wl_shell_surface_listener WaylandDisplay::kShellSurfaceListener = {
 
       auto success = FlutterEngineSendWindowMetricsEvent(wd->engine_, &event) == kSuccess;
 
-      FLWAY_LOG << "shell.configure: " << event.width << "x" << event.height << " par: " << event.pixel_ratio << " status: " << (success ? "success" : "failed") << std::endl;
+      dbgI("shell.configure: %zdx%zd par: %.3g status: %s\n", event.width, event.height, event.pixel_ratio, (success ? "success" : "failed"));
     },
 
     .popup_done = [](void *data, struct wl_shell_surface *wl_shell_surface) -> void {
@@ -206,9 +207,9 @@ const wl_keyboard_listener WaylandDisplay::kKeyboardListener = {
           wd->xkb_state = xkb_state_new(wd->keymap);
         },
 
-    .enter = [](void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, struct wl_surface *surface, struct wl_array *keys) { printf("keyboard enter\n"); },
+    .enter = [](void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, struct wl_surface *surface, struct wl_array *keys) { dbgI("key: keyboard enter\n"); },
 
-    .leave = [](void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, struct wl_surface *surface) { printf("keyboard leave\n"); },
+    .leave = [](void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, struct wl_surface *surface) { dbgI("key: keyboard leave\n"); },
 
     .key =
         [](void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, uint32_t time, uint32_t key, uint32_t state_w) {
@@ -228,7 +229,7 @@ const wl_keyboard_listener WaylandDisplay::kKeyboardListener = {
           const int rv = timerfd_settime(wd->key.timer_fd_, 0, &ts, nullptr);
 
           if (rv == -1) {
-            printf("ERROR: timerfd_settime returned -1 (errno: %d)\n", errno);
+            dbgE("timerfd_settime returned: %d (errno: %d)\n", rv, errno);
           }
         },
 
@@ -251,7 +252,7 @@ const wl_keyboard_listener WaylandDisplay::kKeyboardListener = {
             wd->key.repeat_delay_ms_ = delay;
           }
 
-          printf("key.repeat_info delay:%d, rate:%d -> delay:%d[ms], repeat-interval:%d[ms]\n", delay, rate, wd->key.repeat_delay_ms_, wd->key.repeat_interval_ms_);
+          dbgI("key: repeat_info delay:%d, rate:%d -> delay:%d[ms], repeat-interval:%d[ms]\n", delay, rate, wd->key.repeat_delay_ms_, wd->key.repeat_interval_ms_);
         },
 };
 
@@ -261,22 +262,22 @@ const wl_seat_listener WaylandDisplay::kSeatListener = {
           WaylandDisplay *const wd = get_wayland_display(data);
           assert(seat == wd->seat_);
 
-          printf("seat.capabilities(data:%p, seat:%p, capabilities:0x%x)\n", data, static_cast<void *>(seat), capabilities);
+          dbgI("seat.capabilities(data:%p, seat:%p, capabilities:0x%x)\n", data, static_cast<void *>(seat), capabilities);
 
           if (capabilities & WL_SEAT_CAPABILITY_POINTER) {
-            printf("seat.capabilities: pointer\n");
+            dbgI("seat.capabilities: pointer\n");
             struct wl_pointer *pointer = wl_seat_get_pointer(seat);
             wl_pointer_add_listener(pointer, &kPointerListener, wd);
           }
 
           if (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) {
-            printf("seat.capabilities: keyboard\n");
+            dbgI("seat.capabilities: keyboard\n");
             struct wl_keyboard *keyboard = wl_seat_get_keyboard(seat);
             wl_keyboard_add_listener(keyboard, &kKeyboardListener, wd);
           }
 
           if (capabilities & WL_SEAT_CAPABILITY_TOUCH) {
-            printf("seat.capabilities: touch\n");
+            dbgI("seat.capabilities: touch\n");
           }
         },
 
@@ -294,8 +295,8 @@ const wl_output_listener WaylandDisplay::kOutputListener = {
           wd->physical_width_  = physical_width;
           wd->physical_height_ = physical_height;
 
-          printf("output.geometry(data:%p, wl_output:%p, x:%d, y:%d, physical_width:%d, physical_height:%d, subpixel:%d, make:%s, model:%s, transform:%d)\n", data, static_cast<void *>(wl_output), x, y, physical_width, physical_height,
-                 subpixel, make, model, transform);
+          dbgI("output.geometry(data:%p, wl_output:%p, x:%d, y:%d, physical_width:%d, physical_height:%d, subpixel:%d, make:%s, model:%s, transform:%d)\n", data, static_cast<void *>(wl_output), x, y, physical_width, physical_height,
+               subpixel, make, model, transform);
         },
     .mode =
         [](void *data, struct wl_output *wl_output, uint32_t flags, int32_t width, int32_t height, int32_t refresh) {
@@ -303,7 +304,7 @@ const wl_output_listener WaylandDisplay::kOutputListener = {
 
           wd->vsync.vblank_time_ns_ = 1'000'000'000'000 / refresh;
 
-          printf("output.mode(data:%p, wl_output:%p, flags:%d, width:%d->%d, height:%d->%d, refresh:%d)\n", data, static_cast<void *>(wl_output), flags, wd->screen_width_, width, wd->screen_height_, height, refresh);
+          dbgI("output.mode(data:%p, wl_output:%p, flags:%d, width:%d->%d, height:%d->%d, refresh:%d)\n", data, static_cast<void *>(wl_output), flags, wd->screen_width_, width, wd->screen_height_, height, refresh);
 
           if (wd->engine_) {
             FlutterWindowMetricsEvent event = {};
@@ -316,11 +317,10 @@ const wl_output_listener WaylandDisplay::kOutputListener = {
 
             wl_egl_window_resize(wd->window_, wd->screen_width_, wd->screen_height_, 0, 0);
 
-            FLWAY_LOG << "Window resized: " << event.width << "x" << event.height << " par: " << event.pixel_ratio << " status: " << (success ? "success" : "failed") << std::endl;
+            dbgI("Window resized: %zdx%zd par: %.3g status: %s.\n", event.width, event.height, event.pixel_ratio, (success ? "success" : "failed"));
           } else {
             wd->window_metrix_skipped_ = true;
-            FLWAY_LOG << "Window resized: " << wd->screen_width_ << "x" << wd->screen_width_ << " status: "
-                      << "skipped" << std::endl;
+            dbgI("Window resized: %dx%d status: %s.\n", wd->screen_width_, wd->screen_width_, "skipped");
           }
         },
     .done  = [](void *data, struct wl_output *wl_output) { printf("output.done(data:%p, wl_output:%p)\n", data, static_cast<void *>(wl_output)); },
@@ -339,7 +339,7 @@ const struct wp_presentation_feedback_listener WaylandDisplay::kPresentationFeed
             static auto displayed = false;
 
             if (!displayed) {
-              printf("WARN: Variable display rate output: vblank_time_ns: %ju refresh: %u\n", wd->vsync.vblank_time_ns_, refresh);
+              dbgW("Variable display rate output: vblank_time_ns: %ju refresh: %u\n", wd->vsync.vblank_time_ns_, refresh);
               displayed = true;
             }
           }
@@ -349,7 +349,7 @@ const struct wp_presentation_feedback_listener WaylandDisplay::kPresentationFeed
     .discarded =
         [](void *data, struct wp_presentation_feedback *wp_presentation_feedback) {
           // TODO: remove it
-          printf("presentation.frame dropped\n");
+          dbgW("presentation.frame dropped\n");
         },
 }; // namespace flutter
 
@@ -360,13 +360,13 @@ const struct wp_presentation_listener WaylandDisplay::kPresentationListener = {
 
           wd->vsync.presentation_clk_id_ = clk_id;
 
-          printf("presentation.clk_id: %u\n", clk_id);
+          dbgI("presentation.clk_id: %u\n", clk_id);
         },
 };
 
 bool WaylandDisplay::key_handler(const uint32_t key, const uint32_t state_w, const bool is_repeat) {
   if (keymap_format == WL_KEYBOARD_KEYMAP_FORMAT_NO_KEYMAP) {
-    printf("key: Hmm - no keymap, no key event\n");
+    dbgW("key: Hmm - no keymap, no key event\n");
     return false;
   }
 
@@ -374,7 +374,7 @@ bool WaylandDisplay::key_handler(const uint32_t key, const uint32_t state_w, con
   const xkb_keysym_t keysym            = xkb_state_key_get_one_sym(xkb_state, hardware_keycode);
 
   if (keysym == XKB_KEY_NoSymbol) {
-    printf("key: Hmm - no key symbol, no key event\n");
+    dbgW("key: Hmm - no key symbol, no key event\n");
     return false;
   }
 
@@ -411,15 +411,15 @@ bool WaylandDisplay::key_handler(const uint32_t key, const uint32_t state_w, con
 
   if (utf32) {
     if (utf32 >= 0x21 && utf32 <= 0x7E) {
-      printf("key: %c %s%s\n", (char)utf32, type == GDK_KEY_PRESS ? "pressed" : "released", is_repeat ? " [r]" : "");
+      dbgT("key: %c %s%s\n", (char)utf32, type == GDK_KEY_PRESS ? "pressed" : "released", is_repeat ? " [r]" : "");
     } else {
-      printf("key: U+%04X %s%s\n", utf32, type == GDK_KEY_PRESS ? "pressed" : "released", is_repeat ? " [r]" : "");
+      dbgT("key: U+%04X %s%s\n", utf32, type == GDK_KEY_PRESS ? "pressed" : "released", is_repeat ? " [r]" : "");
     }
   } else {
     char name[64];
     xkb_keysym_get_name(keysym, name, sizeof(name));
 
-    printf("key: %s %s%s\n", name, type == GDK_KEY_PRESS ? "pressed" : "released", is_repeat ? " [r]" : "");
+    dbgT("key: %s %s%s\n", name, type == GDK_KEY_PRESS ? "pressed" : "released", is_repeat ? " [r]" : "");
   }
 
   std::string message;
@@ -443,7 +443,7 @@ bool WaylandDisplay::key_handler(const uint32_t key, const uint32_t state_w, con
     bool success = FlutterSendMessage(engine_, "flutter/keyevent", reinterpret_cast<const uint8_t *>(message.c_str()), message.size());
 
     if (!success) {
-      FLWAY_ERROR << "Error sending PlatformMessage: " << message << std::endl;
+      dbgE("Error sending PlatformMessage: %s\n", message.c_str());
     }
   }
 
@@ -455,33 +455,33 @@ WaylandDisplay::WaylandDisplay(size_t width, size_t height, const std::string &b
     , screen_width_(width)
     , screen_height_(height) {
   if (screen_width_ == 0 || screen_height_ == 0) {
-    FLWAY_ERROR << "Invalid screen dimensions." << std::endl;
+    dbgE("Invalid screen dimensions\n");
     return;
   }
 
   if (socketpair(AF_LOCAL, SOCK_DGRAM | SOCK_CLOEXEC, 0, &vsync.sv_[0]) == -1) {
-    FLWAY_ERROR << "socketpair() failed, errno: " << errno << std::endl;
+    dbgE("socketpair() failed, errno: %d\n", errno);
     return;
   }
 
   key.timer_fd_ = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
 
   if (key.timer_fd_ < 0) {
-    FLWAY_ERROR << "Could not create timer." << std::endl;
+    dbgE("Could not create timer\n");
     return;
   }
 
   display_ = wl_display_connect(nullptr);
 
   if (!display_) {
-    FLWAY_ERROR << "Could not connect to the wayland display." << std::endl;
+    dbgE("Could not connect to the wayland display\n");
     return;
   }
 
   registry_ = wl_display_get_registry(display_);
 
   if (!registry_) {
-    FLWAY_ERROR << "Could not get the wayland registry." << std::endl;
+    dbgE("Could not get the wayland registry\n");
     return;
   }
 
@@ -490,12 +490,12 @@ WaylandDisplay::WaylandDisplay(size_t width, size_t height, const std::string &b
   wl_display_roundtrip(display_);
 
   if (!SetupEGL()) {
-    FLWAY_ERROR << "Could not setup EGL." << std::endl;
+    dbgE("Could not setup EGL.\n");
     return;
   }
 
   if (!SetupEngine(bundle_path, command_line_args)) {
-    FLWAY_ERROR << "Could not setup Flutter Engine." << std::endl;
+    dbgE("Could not setup Flutter Engine\n");
     return;
   }
 
@@ -511,7 +511,7 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
 
     if (eglMakeCurrent(wd->egl_display_, wd->egl_surface_, wd->egl_surface_, wd->egl_context_) != EGL_TRUE) {
       LogLastEGLError();
-      FLWAY_ERROR << "Could not make the onscreen context current" << std::endl;
+      dbgE("Could not make the onscreen context current\n");
       return false;
     }
 
@@ -522,7 +522,7 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
 
     if (eglMakeCurrent(wd->egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) != EGL_TRUE) {
       LogLastEGLError();
-      FLWAY_ERROR << "Could not clear the context." << std::endl;
+      dbgE("Could not clear the context\n");
       return false;
     }
 
@@ -533,7 +533,7 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
 
     if (eglSwapBuffers(wd->egl_display_, wd->egl_surface_) != EGL_TRUE) {
       LogLastEGLError();
-      FLWAY_ERROR << "Could not swap the EGL buffer." << std::endl;
+      dbgE("Could not swap the EGL buffer\n");
       return false;
     }
 
@@ -545,7 +545,7 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
 
     if (eglMakeCurrent(wd->egl_display_, wd->resource_egl_surface_, wd->resource_egl_surface_, wd->resource_egl_context_) != EGL_TRUE) {
       LogLastEGLError();
-      FLWAY_ERROR << "Could not make the RESOURCE context current" << std::endl;
+      dbgE("Could not make the RESOURCE context current\n");
       return false;
     }
 
@@ -558,7 +558,7 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
       return reinterpret_cast<void *>(address);
     }
 
-    FLWAY_LOG << "Using dlsym fallback to resolve: " << name << std::endl;
+    dbgW("Using dlsym fallback to resolve: %s\n.", name ? name : "");
 
     address = reinterpret_cast<void (*)()>(dlsym(RTLD_DEFAULT, name));
 
@@ -566,7 +566,7 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
       return reinterpret_cast<void *>(address);
     }
 
-    FLWAY_ERROR << "Tried unsuccessfully to resolve: " << name << std::endl;
+    dbgW("Tried unsuccessfully to resolve: %s\n.", name ? name : "");
     return nullptr;
   };
 
@@ -592,7 +592,7 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
         WaylandDisplay *const wd = get_wayland_display(data);
 
         if (wd->vsync.baton_ != 0) {
-          printf("ERROR: vsync.wait: New baton arrived, but old was not sent.\n");
+          dbgE("vsync.wait: New baton arrived, but old was not sent\n");
           exit(1);
         }
 
@@ -603,11 +603,11 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
         }
       },
       .compute_platform_resolved_locale_callback = [](const FlutterLocale **supported_locales, size_t number_of_locales) -> const FlutterLocale * {
-        printf("locale.resolved.callback: number_of_locales: %zu\n", number_of_locales);
+        dbgI("locale.resolved.callback: number_of_locales: %zu\n", number_of_locales);
 
         if (number_of_locales > 0) {
           const FlutterLocale *fl = supported_locales[0];
-          printf("locale.resolved: %s_%s.%s@%s\n", fl->language_code ? fl->language_code : "", fl->country_code ? fl->country_code : "", fl->script_code ? fl->script_code : "", fl->variant_code ? fl->variant_code : "");
+          dbgI("locale.resolved: %s_%s.%s@%s\n", fl->language_code ? fl->language_code : "", fl->country_code ? fl->country_code : "", fl->script_code ? fl->script_code : "", fl->variant_code ? fl->variant_code : "");
           return fl;
         }
 
@@ -618,16 +618,16 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
   std::string libapp_aot_path = bundle_path + "/" + FlutterGetAppAotElfName(); // dw: TODO: There seems to be no convention name we could use, so let's temporary hardcode the path.
 
   if (FlutterEngineRunsAOTCompiledDartCode()) {
-    FLWAY_LOG << "Using AOT precompiled runtime." << std::endl;
+    dbgI("Using AOT precompiled runtime\n");
 
     if (std::ifstream(libapp_aot_path)) {
-      FLWAY_LOG << "Lading AOT snapshot: " << libapp_aot_path << std::endl;
+      dbgI("Loading AOT snapshot: %s\n", libapp_aot_path.c_str());
 
       const char *error;
       auto handle = Aot_LoadELF(libapp_aot_path.c_str(), 0, &error, &args.vm_snapshot_data, &args.vm_snapshot_instructions, &args.isolate_snapshot_data, &args.isolate_snapshot_instructions);
 
       if (!handle) {
-        FLWAY_ERROR << "Could not load AOT library: " << libapp_aot_path << " (error: " << error << ")" << std::endl;
+        dbgE("Could not load AOT library: %s (error: %s).\n", libapp_aot_path.c_str(), error ? error : "");
         return false;
       }
     }
@@ -636,14 +636,14 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
   auto result = FlutterEngineInitialize(FLUTTER_ENGINE_VERSION, &config, &args, this /* userdata */, &engine_);
 
   if (result != kSuccess) {
-    FLWAY_ERROR << "Could not initialize the Flutter engine" << std::endl;
+    dbgE("Could not initialize the Flutter engine.\n");
     return false;
   }
 
   result = FlutterEngineRunInitialized(engine_);
 
   if (result != kSuccess) {
-    FLWAY_ERROR << "Could not run the Flutter engine" << std::endl;
+    dbgE("Could not run the Flutter engine.\n");
     return false;
   }
 
@@ -653,13 +653,13 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
     FlutterParseLocale(lang, &fl);
 
     if (fl.language_code != nullptr) {
-      printf("locale.parsed: %s_%s.%s@%s\n", fl.language_code ? fl.language_code : "", fl.country_code ? fl.country_code : "", fl.script_code ? fl.script_code : "", fl.variant_code ? fl.variant_code : "");
+      dbgI("locale.parsed: %s_%s.%s@%s\n", fl.language_code ? fl.language_code : "", fl.country_code ? fl.country_code : "", fl.script_code ? fl.script_code : "", fl.variant_code ? fl.variant_code : "");
       const FlutterLocale *flutter_locales[] = {&fl};
 
       const auto rv = FlutterEngineUpdateLocales(engine_, flutter_locales, std::size(flutter_locales));
 
       if (rv != kSuccess) {
-        FLWAY_ERROR << "Could not update locales for the Flutter engine" << std::endl;
+        dbgE("Could not update locales for the Flutter engine\n");
         return false;
       }
     }
@@ -675,7 +675,7 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
 
     const auto success = FlutterEngineSendWindowMetricsEvent(engine_, &event) == kSuccess;
 
-    FLWAY_LOG << "Window metric: " << event.width << "x" << event.height << " par: " << event.pixel_ratio << " status: " << (success ? "success" : "failed") << std::endl;
+    dbgI("Window metric: %zdx%zd par: %.3g status: %s\n", event.width, event.height, event.pixel_ratio, (success ? "success" : "failed"));
 
     return success;
   }
@@ -690,7 +690,7 @@ WaylandDisplay::~WaylandDisplay() {
     if (result == kSuccess) {
       engine_ = nullptr;
     } else {
-      FLWAY_ERROR << "Could not shutdown the Flutter engine." << std::endl;
+      dbgE("Could not shutdown the Flutter engine.\n");
     }
   }
 
@@ -835,7 +835,7 @@ ssize_t WaylandDisplay::vSyncSendNotifyData() {
 
 bool WaylandDisplay::Run() {
   if (!valid_) {
-    FLWAY_ERROR << "Could not run an invalid display." << std::endl;
+    dbgE("Could not run an invalid display.\n");
     return false;
   }
 
@@ -934,19 +934,19 @@ bool WaylandDisplay::SetupEGL() {
   egl_display_ = eglGetDisplay(display_);
   if (egl_display_ == EGL_NO_DISPLAY) {
     LogLastEGLError();
-    FLWAY_ERROR << "Could not access EGL display." << std::endl;
+    dbgE("Could not access EGL display.\n");
     return false;
   }
 
   if (eglInitialize(egl_display_, nullptr, nullptr) != EGL_TRUE) {
     LogLastEGLError();
-    FLWAY_ERROR << "Could not initialize EGL display." << std::endl;
+    dbgE("Could not initialize EGL display.\n");
     return false;
   }
 
   if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
     LogLastEGLError();
-    FLWAY_ERROR << "Could not bind the ES API." << std::endl;
+    dbgE("Could not bind the ES API.\n");
     return false;
   }
 
@@ -972,13 +972,13 @@ bool WaylandDisplay::SetupEGL() {
 
     if (eglChooseConfig(egl_display_, attribs, &egl_config, 1, &config_count) != EGL_TRUE) {
       LogLastEGLError();
-      FLWAY_ERROR << "Error when attempting to choose an EGL surface config." << std::endl;
+      dbgE("Error when attempting to choose an EGL surface config.\n");
       return false;
     }
 
     if (config_count == 0 || egl_config == nullptr) {
       LogLastEGLError();
-      FLWAY_ERROR << "No matching configs." << std::endl;
+      dbgE("No matching configs.\n");
       return false;
     }
   }
@@ -991,27 +991,27 @@ bool WaylandDisplay::SetupEGL() {
 
     if (egl_context_ == EGL_NO_CONTEXT) {
       LogLastEGLError();
-      FLWAY_ERROR << "Could not create an onscreen context." << std::endl;
+      dbgE("Could not create an onscreen context.\n");
       return false;
     }
   }
 
   if (!compositor_ || !shell_) {
-    FLWAY_ERROR << "EGL setup needs missing compositor and shell connection." << std::endl;
+    dbgE("EGL setup needs missing compositor and shell connection.\n");
     return false;
   }
 
   surface_ = wl_compositor_create_surface(compositor_);
 
   if (!surface_) {
-    FLWAY_ERROR << "Could not create compositor surface." << std::endl;
+    dbgE("Could not create compositor surface.\n");
     return false;
   }
 
   shell_surface_ = wl_shell_get_shell_surface(shell_, surface_);
 
   if (!shell_surface_) {
-    FLWAY_ERROR << "Could not shell surface." << std::endl;
+    dbgE("Could not shell surface.\n");
     return false;
   }
 
@@ -1024,7 +1024,7 @@ bool WaylandDisplay::SetupEGL() {
   window_ = wl_egl_window_create(surface_, screen_width_, screen_height_);
 
   if (!window_) {
-    FLWAY_ERROR << "Could not create EGL window." << std::endl;
+    dbgE("Could not create EGL window.\n");
     return false;
   }
 
@@ -1041,7 +1041,7 @@ bool WaylandDisplay::SetupEGL() {
 
     if (egl_surface_ == EGL_NO_SURFACE) {
       LogLastEGLError();
-      FLWAY_ERROR << "EGL surface was null during surface selection." << std::endl;
+      dbgE("EGL surface was null during surface selection.\n");
       return false;
     }
   }
