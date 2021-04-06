@@ -37,6 +37,15 @@
 
 #include <sstream>
 
+#include <unistd.h>
+#include <sys/syscall.h>
+
+#define DBG_TIMING(x)
+
+DBG_TIMING(
+#define gettid() syscall(SYS_gettid)
+    static uint64_t t00;)
+
 namespace flutter {
 
 static double get_pixel_ratio(int32_t physical_width, int32_t physical_height, int32_t pixels_width, int32_t pixels_height) {
@@ -346,6 +355,14 @@ const struct wp_presentation_feedback_listener WaylandDisplay::kPresentationFeed
             }
           }
 
+          DBG_TIMING({
+            static auto t0 = FlutterEngineGetCurrentTime();
+            const auto t1  = FlutterEngineGetCurrentTime();
+            // dbgI("[%09.4f][%ld] presented: %09lldns flags:%08x p2p-diff:%5lldus rerfresh:%u\n", (t1-t00)/1e9, gettid(), (new_last_frame_ns-t00), flags, (new_last_frame_ns - wd->vsync.last_frame_)/1000, refresh);
+            dbgI("[%09.4f][%ld] presented %09.4f f:%08x dc:%.5f df:%.5f r:%u\n", (t1 - t00) / 1e9, gettid(), (new_last_frame_ns - t00) / 1e9, flags, (t1 - t0) / 1e9, (new_last_frame_ns - wd->vsync.last_frame_) / 1e9, refresh);
+            t0 = t1;
+          })
+
           wd->vsync.last_frame_ = new_last_frame_ns;
         },
     .discarded =
@@ -501,6 +518,7 @@ WaylandDisplay::WaylandDisplay(size_t width, size_t height, const std::string &b
     return;
   }
 
+  DBG_TIMING({ t00 = FlutterEngineGetCurrentTime(); });
   valid_ = true;
 }
 
@@ -533,11 +551,15 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
   config.open_gl.present = [](void *data) -> bool {
     WaylandDisplay *const wd = get_wayland_display(data);
 
+    DBG_TIMING(static auto tprev = FlutterEngineGetCurrentTime(); auto tb = FlutterEngineGetCurrentTime(); dbgI("[%09.4f][%ld] >>> swap buffer [%09.4f]\n", (tb - t00) / 1e9, gettid(), (tb - tprev) / 1e9););
+
     if (eglSwapBuffers(wd->egl_display_, wd->egl_surface_) != EGL_TRUE) {
       LogLastEGLError();
       dbgE("Could not swap the EGL buffer\n");
       return false;
     }
+
+    DBG_TIMING(auto ta = FlutterEngineGetCurrentTime(); dbgI("[%09.4f][%ld] <<< swap buffer [dur:%09.4f]\n", (ta - t00) / 1e9, gettid(), (ta - tb) / 1e9); tprev = tb;);
 
     return true;
   };
@@ -592,6 +614,11 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
       .command_line_argv = command_line_args_c.data(),
       .vsync_callback    = [](void *data, intptr_t baton) -> void {
         WaylandDisplay *const wd = get_wayland_display(data);
+
+        DBG_TIMING({
+          auto tx = FlutterEngineGetCurrentTime();
+          dbgI("[%09.4f][%ld] vsync callback [%jx]\n", (tx - t00) / 1e9, gettid(), static_cast<uintmax_t>(baton));
+        });
 
         if (wd->vsync.baton_ != 0) {
           dbgE("vsync.wait: New baton arrived, but old was not sent\n");
@@ -851,6 +878,12 @@ ssize_t WaylandDisplay::vSyncHandler() {
   const uint64_t finish_time_ns            = current_ns + vsync.vblank_time_ns_;
   intptr_t baton                           = std::atomic_exchange(&vsync.baton_, 0);
 
+  DBG_TIMING({
+    auto tx = FlutterEngineGetCurrentTime();
+    dbgI("[%09.4f][%ld] flutterEngineOnVsync [%jx]  (t:%09.4f d:%09.4f vb:%09.4f c:%09.4f f:%09.4f)\n", (tx - t00) / 1e9, gettid(), static_cast<uintmax_t>(baton), (t_now_ns - t00) / 1e9, (t_now_ns - vsync.last_frame_) / 1e9,
+         vsync.vblank_time_ns_ / 1e9, (current_ns - t00) / 1e9, (finish_time_ns - t00) / 1e9);
+  });
+
   const auto status = FlutterEngineOnVsync(engine_, baton, current_ns, finish_time_ns);
 
   if (status != kSuccess) {
@@ -979,6 +1012,10 @@ bool WaylandDisplay::Run() {
         }
 
         if (vsync.presentation_clk_id_ != UINT32_MAX && presentation_ != nullptr) {
+          DBG_TIMING({
+            auto tx = FlutterEngineGetCurrentTime();
+            dbgI("[%09.4f][%ld] add listener\n", (tx - t00) / 1e9, gettid());
+          });
           wp_presentation_feedback_add_listener(::wp_presentation_feedback(presentation_, surface_), &kPresentationFeedbackListener, this);
           wl_display_dispatch_pending(display_);
         }
