@@ -35,6 +35,8 @@
 #include "egl_utils.h"
 #include "wayland_display.h"
 
+#include <sstream>
+
 namespace flutter {
 
 static double get_pixel_ratio(int32_t physical_width, int32_t physical_height, int32_t pixels_width, int32_t pixels_height) {
@@ -665,6 +667,8 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
     }
   }
 
+  SetupMemoryWatcher();
+
   if (window_metrix_skipped_) {
     FlutterWindowMetricsEvent event = {};
 
@@ -683,7 +687,81 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
   return true;
 }
 
+void WaylandDisplay::MemoryWatcherThread() {
+  dbgT("MemoryWatcherThread start");
+  const auto min_time_between_warnings = std::chrono::seconds(10);
+  const auto check_memory_period       = std::chrono::seconds(1);
+
+  std::string memstr;
+  long current_level     = 0;
+  auto last_warning_sent = std::chrono::steady_clock::now();
+  std::unique_lock<std::mutex> lock(watcher_thread_mutex_);
+  while (!stop_watcher_thread_.load()) {
+    watcher_thread_cv_.wait_for(lock, check_memory_period);
+    if (stop_watcher_thread_.load())
+      return;
+    std::ifstream istrm_mem(memory_file_path_, std::ios::binary);
+    if (!(istrm_mem.is_open())) {
+      dbgT("couldn't open %s", memory_file_path_.c_str());
+    } else {
+      std::getline(istrm_mem, memstr);
+      long mem = atol(memstr.c_str());
+      dbgT("Memory: %ld\n", mem);
+      if (mem > 0) {
+        long level = 0;
+        for (auto memwatchlevel : memory_watch_levels_) {
+          if (memwatchlevel > mem)
+            break;
+          else
+            ++level;
+        }
+        dbgT("current memory level: %ld\n", level);
+        if (level > current_level) {
+          auto now = std::chrono::steady_clock::now();
+          if (now >= last_warning_sent + min_time_between_warnings) {
+            dbgT("sending FlutterEngineNotifyLowMemoryWarning");
+            FlutterEngineNotifyLowMemoryWarning(engine_);
+            last_warning_sent = now;
+          }
+        }
+        current_level = level;
+      }
+    }
+  }
+}
+
+void WaylandDisplay::SetupMemoryWatcher() {
+  memory_file_path_ = getEnv("FLUTTER_LAUNCHER_WAYLAND_USED_MEMORY_FILE_PATH", std::string());
+  dbgT("SetupMemoryWatcher start, memory_file_path_: %s\n", memory_file_path_.c_str());
+  if (!memory_file_path_.empty()) {
+    std::string memoryWarningLevels = getEnv("FLUTTER_LAUNCHER_WAYLAND_MEMORY_WARNING_WATERMARK_BYTES", std::string());
+    if (!memoryWarningLevels.empty()) {
+      std::stringstream ss{memoryWarningLevels};
+      std::string level;
+      while (std::getline(ss, level, ',')) {
+        if (long l = atol(level.c_str())) {
+          memory_watch_levels_.push_back(l);
+        } else {
+          dbgE("Memory watcher will not run - could not perform conversion to long for %s; FLUTTER_LAUNCHER_WAYLAND_MEMORY_WARNING_WATERMARK_BYTES: %s\n", level.c_str(), memoryWarningLevels.c_str());
+          return;
+        }
+      }
+      if (memory_watch_levels_.size() > 0) {
+        memory_watcher_thread_.reset(new std::thread(std::bind(std::mem_fn(&WaylandDisplay::MemoryWatcherThread), this)));
+      } else {
+        dbgE("Memory watcher will not run - needs at least 1 memory level; FLUTTER_LAUNCHER_WAYLAND_MEMORY_WARNING_WATERMARK_BYTES: %s\n", memoryWarningLevels.c_str());
+      }
+    }
+  }
+}
+
 WaylandDisplay::~WaylandDisplay() {
+  if (memory_watcher_thread_) {
+    stop_watcher_thread_.store(true);
+    watcher_thread_cv_.notify_one();
+    memory_watcher_thread_->join();
+    memory_watcher_thread_.reset();
+  }
 
   if (engine_) {
     auto result = FlutterEngineShutdown(engine_);

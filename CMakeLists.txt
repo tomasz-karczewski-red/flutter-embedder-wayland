@@ -86,6 +86,7 @@ target_link_libraries(flutter-launcher-wayland
   ${WAYLAND_CLIENT_LIBRARIES}
   ${WAYLAND_EGL_LIBRARIES}
   ${FLUTTER_ENGINE_LIBRARIES}
+  pthread
 )
 
 install(TARGETS flutter-launcher-wayland DESTINATION bin)

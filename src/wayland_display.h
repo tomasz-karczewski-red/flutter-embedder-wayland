@@ -6,6 +6,9 @@
 #pragma once
 
 #include <atomic>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 #include <unistd.h>
 #include <EGL/egl.h>
 #include <wayland-client.h>
@@ -85,11 +88,22 @@ private:
 
   FlutterEngine engine_ = nullptr;
 
+  std::unique_ptr<std::thread> memory_watcher_thread_;
+  std::string memory_file_path_;
+  std::vector<long> memory_watch_levels_;
+  std::atomic_bool stop_watcher_thread_ = false;
+  std::condition_variable watcher_thread_cv_;
+  std::mutex watcher_thread_mutex_;
+
   bool SetupEGL();
 
   bool SetupEngine(const std::string &bundle_path, const std::vector<std::string> &command_line_args);
 
   bool StopRunning();
+
+  void SetupMemoryWatcher();
+
+  void MemoryWatcherThread();
 
   // key repeat related
   struct {
