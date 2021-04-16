@@ -35,10 +35,17 @@
 #include "egl_utils.h"
 #include "wayland_display.h"
 
+#include <sstream>
+
 #include <unistd.h>
 #include <sys/syscall.h>
 
+#include <sys/eventfd.h>
+#include <fcntl.h>
+
 #define DBG_TIMING(x)
+
+#define MEMWATCHTAG "memwatcher: "
 
 DBG_TIMING(
 #define gettid() syscall(SYS_gettid)
@@ -692,6 +699,8 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
     }
   }
 
+  SetupMemoryWatcher();
+
   if (window_metrix_skipped_) {
     FlutterWindowMetricsEvent event = {};
 
@@ -710,7 +719,143 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
   return true;
 }
 
+void WaylandDisplay::HandleMemoryWatcherEvent() {
+  // minimum 20 sec between FlutterEngineNotifyLowMemoryWarning calls
+  constexpr auto min_time_between_warnings_ns_ = uint64_t(2e10);
+  const uint64_t now_ns                        = FlutterEngineGetCurrentTime();
+  constexpr int readsz                         = 32;
+
+  if (now_ns < memory_watcher_.last_warning_sent_ns + min_time_between_warnings_ns_) {
+    return;
+  }
+
+  lseek(memory_watcher_.memory_file_fd, 0, SEEK_SET);
+
+  char memstr[readsz];
+  int pos = 0;
+  int rv  = 0;
+  do {
+    rv = read(memory_watcher_.memory_file_fd, memstr + pos, readsz - 1 - pos);
+    if (rv != -1)
+      pos += rv;
+  } while ((rv == -1 && errno == EINTR) || rv > 0);
+  memstr[pos] = '\0';
+  if (rv == -1) {
+    dbgW(MEMWATCHTAG "problem reading memory_usage, errno:%d\n", errno);
+    return;
+  }
+
+  dbgT(MEMWATCHTAG "current mem: %s\n", memstr);
+  const long mem = atol(memstr);
+  if (mem > 0) {
+    long level = 0;
+    for (auto memwatchlevel : memory_watcher_.levels) {
+      if (memwatchlevel > mem)
+        break;
+      else
+        ++level;
+    }
+    dbgT(MEMWATCHTAG "current memory level: %ld\n", level);
+    if (level > memory_watcher_.current_level) {
+      dbgW(MEMWATCHTAG "sending FlutterEngineNotifyLowMemoryWarning\n");
+      auto ret = FlutterEngineNotifyLowMemoryWarning(engine_);
+      if (ret != kSuccess) {
+        dbgE(MEMWATCHTAG "FlutterEngineNotifyLowMemoryWarning failed with %d\n", int(ret));
+        return;
+      }
+      memory_watcher_.last_warning_sent_ns = now_ns;
+    }
+    memory_watcher_.current_level = level;
+  }
+}
+
+void WaylandDisplay::CleanupMemoryWatcher() {
+  if (memory_watcher_.memory_file_fd != -1) {
+    close(memory_watcher_.memory_file_fd);
+    memory_watcher_.memory_file_fd = -1;
+  }
+  if (memory_watcher_.event_fd != -1) {
+    close(memory_watcher_.event_fd);
+    memory_watcher_.event_fd = -1;
+  }
+}
+
+void WaylandDisplay::SetupMemoryWatcher() {
+  const std::string cgroup_memory_path = getEnv("FLUTTER_LAUNCHER_WAYLAND_CGROUP_MEMORY_PATH", std::string());
+  if (cgroup_memory_path.empty()) {
+    dbgI(MEMWATCHTAG "Memory watcher will not run - no FLUTTER_LAUNCHER_WAYLAND_CGROUP_MEMORY_PATH env var defined\n");
+  } else {
+    dbgT("SetupMemoryWatcher start, cgroup_memory_path: %s\n", cgroup_memory_path.c_str());
+    const std::string memory_usage_path         = cgroup_memory_path + "/memory.usage_in_bytes";
+    const std::string cgroup_event_control_path = cgroup_memory_path + "/cgroup.event_control";
+    const std::string memoryWarningLevels       = getEnv("FLUTTER_LAUNCHER_WAYLAND_MEMORY_WARNING_WATERMARK_BYTES", std::string());
+    if (memoryWarningLevels.empty()) {
+      dbgI(MEMWATCHTAG "Memory watcher will not run - no FLUTTER_LAUNCHER_WAYLAND_MEMORY_WARNING_WATERMARK_BYTES env var defined\n");
+    } else {
+      std::stringstream ss{memoryWarningLevels};
+      std::string level;
+      while (std::getline(ss, level, ',')) {
+        if (const long l = atol(level.c_str())) {
+          memory_watcher_.levels.push_back(l);
+        } else {
+          dbgE(MEMWATCHTAG "Memory watcher will not run - could not perform conversion to long for %s; FLUTTER_LAUNCHER_WAYLAND_MEMORY_WARNING_WATERMARK_BYTES: %s\n", level.c_str(), memoryWarningLevels.c_str());
+          return;
+        }
+      }
+      if (memory_watcher_.levels.size() < 1) {
+        dbgW(MEMWATCHTAG "Memory watcher will not run - needs at least 1 memory level; FLUTTER_LAUNCHER_WAYLAND_MEMORY_WARNING_WATERMARK_BYTES: %s\n", memoryWarningLevels.c_str());
+      } else {
+        int event_control = -1;
+
+        bool all_succeeded = false;
+        auto cleanup       = [&](bool *) {
+          if (!all_succeeded) {
+            CleanupMemoryWatcher();
+          }
+          if (event_control != -1) {
+            close(event_control);
+            event_control = -1;
+          }
+        };
+        const auto cleanup_watcher = std::unique_ptr<bool, decltype(cleanup)>(&all_succeeded, cleanup);
+
+        memory_watcher_.memory_file_fd = open(memory_usage_path.c_str(), O_RDONLY);
+        if (memory_watcher_.memory_file_fd == -1) {
+          dbgE(MEMWATCHTAG "Cannot open %s, errno: %d\n", memory_usage_path.c_str(), errno);
+          return;
+        }
+
+        event_control = open(cgroup_event_control_path.c_str(), O_WRONLY);
+        if (event_control == -1) {
+          dbgE(MEMWATCHTAG "Cannot open %s, errno: %d\n", cgroup_event_control_path.c_str(), errno);
+          return;
+        }
+
+        memory_watcher_.event_fd = eventfd(0, 0);
+        if (memory_watcher_.event_fd == -1) {
+          dbgE(MEMWATCHTAG "eventfd() failed\n");
+          return;
+        }
+
+        for (auto level : memory_watcher_.levels) {
+          char line[LINE_MAX];
+          snprintf(line, LINE_MAX, "%d %d %ld", memory_watcher_.event_fd, memory_watcher_.memory_file_fd, level);
+          dbgT(MEMWATCHTAG "event_control: writing line '%s'\n", line);
+          const int ret = write(event_control, line, strlen(line) + 1);
+          if (ret == -1) {
+            dbgE(MEMWATCHTAG "Cannot write to cgroup.event_control, errno: %d\n", errno);
+            return;
+          }
+        }
+        dbgI(MEMWATCHTAG "starting memory watcher\n");
+        all_succeeded = true;
+      }
+    }
+  }
+}
+
 WaylandDisplay::~WaylandDisplay() {
+  CleanupMemoryWatcher();
 
   if (engine_) {
     auto result = FlutterEngineShutdown(engine_);
@@ -892,10 +1037,11 @@ bool WaylandDisplay::Run() {
     do {
       int rv;
 
-      struct pollfd fds[3] = {
+      struct pollfd fds[4] = {
           {.fd = vsync.sv_[vsync.SOCKET_READER], .events = POLLIN, .revents = 0},
           {.fd = fd, .events = POLLIN | POLLERR, .revents = 0},
           {.fd = key.timer_fd_, .events = POLLIN | POLLERR, .revents = 0},
+          {.fd = memory_watcher_.event_fd, .events = POLLIN | POLLERR, .revents = 0},
       };
 
       do {
@@ -905,7 +1051,7 @@ bool WaylandDisplay::Run() {
         };
 
         rv = ppoll(&fds[0], std::size(fds), &ts, nullptr);
-      } while (rv == -1 && rv == EINTR);
+      } while (rv == -1 && errno == EINTR);
 
       if (rv == -1) {
         printf("ERROR: ppoll returned -1 (errno: %d)\n", errno);
@@ -955,6 +1101,18 @@ bool WaylandDisplay::Run() {
         wl_display_read_events(display_);
       } else {
         wl_display_cancel_read(display_);
+      }
+
+      if (fds[3].revents & POLLIN) {
+        uint64_t result;
+        do {
+          rv = read(fds[3].fd, &result, sizeof result);
+        } while (rv == -1 && errno == EINTR);
+        if (rv == -1) {
+          dbgE(MEMWATCHTAG "problems reading event fd, errno=%d\n", errno);
+        } else {
+          HandleMemoryWatcherEvent();
+        }
       }
 
       break;

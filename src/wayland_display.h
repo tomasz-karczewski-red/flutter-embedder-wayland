@@ -85,11 +85,25 @@ private:
 
   FlutterEngine engine_ = nullptr;
 
+  struct {
+    std::vector<long> levels;
+    long current_level            = 0;
+    int memory_file_fd            = -1;
+    uint64_t last_warning_sent_ns = 0;
+    int event_fd                  = -1;
+  } memory_watcher_;
+
   bool SetupEGL();
 
   bool SetupEngine(const std::string &bundle_path, const std::vector<std::string> &command_line_args);
 
   bool StopRunning();
+
+  void SetupMemoryWatcher();
+
+  void HandleMemoryWatcherEvent();
+
+  void CleanupMemoryWatcher();
 
   // key repeat related
   struct {
