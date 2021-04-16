@@ -122,6 +122,16 @@ Supported environment variables:
                    where <string> can be any of syslog(3) prioritynames or its
                    unique abbreviation e.g. "err", "warning", "info" or "debug".
 
+     FLUTTER_LAUNCHER_WAYLAND_CGROUP_MEMORY_PATH=<string>
+                   if the app is run inside lxc container - path to where cgroup/memory memory.usage_in_bytes & cgroup.event_control are located
+                   necessary for memory watcher to work
+
+     FLUTTER_LAUNCHER_WAYLAND_MEMORY_WARNING_WATERMARK_BYTES=<string>
+                   if FLUTTER_LAUNCHER_WAYLAND_CGROUP_MEMORY_PATH is defined, this specifies container memory usage levels at which the application
+                   will get FlutterEngineNotifyLowMemoryWarning notifications; the format is comma-separated memory (in bytes) values, like:
+                   "1000000,70000000,148478361,167038156,176318054"
+                   At least one memory level needs to be defined for memory watcher to work. After each notification, there is 20sec cooldown period,
+                   when additional FlutterEngineNotifyLowMemoryWarning notifications will not be called.
 
 ```
 
