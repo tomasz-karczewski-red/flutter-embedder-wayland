@@ -649,6 +649,18 @@ bool WaylandDisplay::SetupEngine(const std::string &bundle_path, const std::vect
       },
   };
 
+  // configure platform task runner; render tasks runner will still be provided by flutter
+  FlutterTaskRunnerDescription platform_task_runner = {};
+  FlutterCustomTaskRunners task_runners             = {};
+  task_runners.struct_size                          = sizeof(FlutterCustomTaskRunners);
+  task_runners.platform_task_runner                 = &platform_task_runner;
+  if (ConfigurePlatformTaskRunner(&platform_task_runner)) {
+    args.custom_task_runners = &task_runners;
+  } else {
+    dbgE("Couldn't configure platform task runner\n");
+    exit(1);
+  }
+
   std::string libapp_aot_path = bundle_path + "/" + FlutterGetAppAotElfName(); // dw: TODO: There seems to be no convention name we could use, so let's temporary hardcode the path.
 
   if (FlutterEngineRunsAOTCompiledDartCode()) {
@@ -1011,6 +1023,16 @@ ssize_t WaylandDisplay::vSyncSendNotifyData() {
   return rv;
 }
 
+static void set_sleep_to_next_platform_event(const uint64_t timestamp_of_next_platform_event, struct timespec &ts) {
+  if (timestamp_of_next_platform_event == 0) {
+    ts = {.tv_sec = LONG_MAX, .tv_nsec = 0};
+  } else {
+    const uint64_t now           = FlutterEngineGetCurrentTime();
+    const uint64_t time_to_sleep = now <= timestamp_of_next_platform_event ? timestamp_of_next_platform_event - now : 0;
+    timespec_from_nsec(&ts, time_to_sleep);
+  }
+}
+
 bool WaylandDisplay::Run() {
   if (!valid_) {
     dbgE("Could not run an invalid display.\n");
@@ -1034,26 +1056,28 @@ bool WaylandDisplay::Run() {
 
     wl_display_flush(display_);
 
-    do {
-      int rv;
+    uint64_t timestamp_of_next_platform_event_ns = 0;
 
-      struct pollfd fds[4] = {
+    do {
+
+      struct timespec ts;
+      set_sleep_to_next_platform_event(timestamp_of_next_platform_event_ns, ts);
+
+      int rv, ppoll_rv;
+
+      struct pollfd fds[5] = {
           {.fd = vsync.sv_[vsync.SOCKET_READER], .events = POLLIN, .revents = 0},
           {.fd = fd, .events = POLLIN | POLLERR, .revents = 0},
           {.fd = key.timer_fd_, .events = POLLIN | POLLERR, .revents = 0},
           {.fd = memory_watcher_.event_fd, .events = POLLIN | POLLERR, .revents = 0},
+          {.fd = event_loop_._platform_event_loop_eventfd, .events = POLLIN | POLLERR, .revents = 0}
       };
 
       do {
-        static const struct timespec ts = {
-            .tv_sec  = LONG_MAX,
-            .tv_nsec = 0,
-        };
+        ppoll_rv = ppoll(&fds[0], std::size(fds), &ts, nullptr);
+      } while (ppoll_rv == -1 && errno == EINTR);
 
-        rv = ppoll(&fds[0], std::size(fds), &ts, nullptr);
-      } while (rv == -1 && errno == EINTR);
-
-      if (rv == -1) {
+      if (ppoll_rv == -1) {
         printf("ERROR: ppoll returned -1 (errno: %d)\n", errno);
         return false;
       }
@@ -1113,6 +1137,18 @@ bool WaylandDisplay::Run() {
         } else {
           HandleMemoryWatcherEvent();
         }
+      }
+
+      const bool event_loop_wakeup = fds[4].revents & POLLIN;
+      if (event_loop_wakeup) {
+        uint64_t result;
+        do {
+          rv = read(fds[4].fd, &result, sizeof result);
+        } while (rv == -1 && errno == EINTR);
+      }
+      // in case of event loop wakeup or if timeout of another event passed - flush events queue
+      if (event_loop_wakeup || ppoll_rv == 0) {
+        timestamp_of_next_platform_event_ns = event_loop_._platform_event_loop->ProcessEvents();
       }
 
       break;
@@ -1241,6 +1277,39 @@ bool WaylandDisplay::SetupEGL() {
     }
   }
 
+  return true;
+}
+
+void WaylandDisplay::RunFlutterTask(const FlutterTask *task) {
+  if (!engine_) {
+    dbgE("FlutterEngineRunTask called before engine was initialized\n");
+  } else if (FlutterEngineRunTask(engine_, task) != kSuccess) {
+    dbgW("FlutterEngineRunTask failed\n");
+  }
+}
+
+bool WaylandDisplay::ConfigurePlatformTaskRunner(FlutterTaskRunnerDescription *task_runner) {
+
+  event_loop_._platform_event_loop_eventfd = eventfd(0, 0);
+  if (event_loop_._platform_event_loop_eventfd == -1) {
+    dbgE("Couldn't create platform event loop event.\n");
+    return false;
+  }
+
+  event_loop_._platform_event_loop = std::make_unique<PlatformEventLoop>(
+      std::this_thread::get_id(),
+      std::bind(&WaylandDisplay::RunFlutterTask,this,std::placeholders::_1),
+      event_loop_._platform_event_loop_eventfd);
+
+  task_runner->struct_size = sizeof(FlutterTaskRunnerDescription);
+  task_runner->user_data   = event_loop_._platform_event_loop.get();
+
+  task_runner->runs_task_on_current_thread_callback = [](void *state) -> bool {
+    return reinterpret_cast<PlatformEventLoop *>(state)->RunsTasksOnCurrentThread();
+  };
+  task_runner->post_task_callback = [](FlutterTask task, uint64_t target_time_nanos, void *state) -> void {
+    reinterpret_cast<PlatformEventLoop *>(state)->PostTask(task, target_time_nanos);
+  };
   return true;
 }
 } // namespace flutter

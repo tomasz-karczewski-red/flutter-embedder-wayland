@@ -35,6 +35,7 @@ set(SOURCES
     src/utils.cc
     src/debug.cc
     src/wayland_display.cc
+    src/event_loop.cc
     src/elf.h
     src/macros.h
     src/keys.h
@@ -42,6 +43,7 @@ set(SOURCES
     src/egl_utils.h
     src/debug.h
     src/wayland_display.h
+    src/event_loop.h
 )
 
 ecm_add_wayland_client_protocol(

@@ -13,6 +13,7 @@
 #include <gdk/gdk.h>
 #include <xkbcommon/xkbcommon.h>
 #include <flutter_embedder.h>
+#include "event_loop.h"
 
 #include <memory>
 #include <string>
@@ -105,6 +106,10 @@ private:
 
   void CleanupMemoryWatcher();
 
+  bool ConfigurePlatformTaskRunner(FlutterTaskRunnerDescription *task_runner);
+
+  void RunFlutterTask(const FlutterTask *task);
+
   // key repeat related
   struct {
     int32_t repeat_delay_ms_    = 400;
@@ -127,6 +132,11 @@ private:
   ssize_t vSyncSendNotifyData();
   ssize_t vSyncReadNotifyData();
   // }
+
+  struct {
+    std::unique_ptr<PlatformEventLoop> _platform_event_loop;
+    int _platform_event_loop_eventfd = -1;
+  } event_loop_;
 
   FLWAY_DISALLOW_COPY_AND_ASSIGN(WaylandDisplay)
 };
